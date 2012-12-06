@@ -27,15 +27,18 @@ src_prepare() {
 	sed -e "s/arm-linux-gnueabihf/${CHOST}/g" \
 		"${S}/makefiles/cmake/toolchains/arm-linux-gnueabihf.cmake" \
 		>"${S}/makefiles/cmake/toolchains/${CHOST}.cmake" || die "sed failed"
+	sed -i -e "s/arm-linux-gnueabihf/${CHOST}/g" "${S}/buildme"
 }
 
 src_compile() {
-	mkdir -p "${S}/build/arm-linux/release"
-	cd "${S}/build/arm-linux/release"
-    cmake \
-		-DCMAKE_TOOLCHAIN_FILE=../../../makefiles/cmake/toolchains/${CHOST}.cmake \
-		-DCMAKE_BUILD_TYPE=Release ../../.. || die "cmake failed"
-	emake || die "emake failed"
+	cd "${S}"
+	./buildme || die "build failed"
+#	mkdir -p "${S}/build/arm-linux/release"
+#	cd "${S}/build/arm-linux/release"
+#    cmake \
+#		-DCMAKE_TOOLCHAIN_FILE=../../../makefiles/cmake/toolchains/${CHOST}.cmake \
+#		-DCMAKE_BUILD_TYPE=Release ../../.. || die "cmake failed"
+#	make || die "emake failed"
 }
 
 src_install() {

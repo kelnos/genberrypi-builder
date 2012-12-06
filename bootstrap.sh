@@ -20,6 +20,9 @@ PACKAGES="
 
 export USE='-dbus -gtk -gtk3 -qt -qt3 -qt4 -X'
 
+NCPUS=$(grep '^processor' /proc/cpuinfo | wc -l)
+export MAKEOPTS="-j$NCPUS"
+
 env-update
 source /etc/profile
 
@@ -47,7 +50,7 @@ EOF
 
 emerge --sync
 emerge -uD world
-emerge ${PACKAGES}
+emerge -u ${PACKAGES}
 rm -rf /usr/portage/distfiles/*
 
 for svc in alsasound avahi-daemon net.eth0 ntpd sshd sysklogd vcfiled vixie-cron; do

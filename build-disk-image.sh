@@ -1,11 +1,11 @@
 #!/bin/bash
 
-set -ex
+set -e
 
 : ${SUDO:=sudo}
 : ${RPI_CHOST:=armv6j-hardfloat-linux-gnueabi}
 : ${TOOLCHAIN_BIN:=/usr/bin}
-: ${QEMU_STATIC:=/usr/bin/qemu-arm}
+: ${QEMU_STATIC:=qemu-arm}
 : ${PYTHON:= python}
 : ${MAKE:=make}
 
@@ -41,7 +41,7 @@ HOST_BINARIES="\
     git \
     losetup \
     parted \
-    qemu-arm \
+    $QEMU_STATIC \
     rsync \
 "
 
@@ -66,16 +66,31 @@ git_fetch() {
     if [ -d $dir ]; then
         pushd $dir
         currev=$(git rev-parse HEAD)
-        git pull
+        echo -n "Updating git repo '$dir'..."
+        git pull &>/dev/null
+        echo ' done.'
         newrev=$(git rev-parse HEAD)
         popd
         [ "$currev" = "$newrev" ] || ret=1
     else
+        echo -n "Cloning git repo '$url'..."
         git clone $url
+        echo ' done.'
         ret=1
     fi
 
     return $ret
+}
+
+url_fetch() {
+    url=$1
+    filename=$(basename "$url")
+
+    if [ ! -e "$filename" ]; then
+        echo -n "Fetching $url..."
+        curl -O "$url" &>/dev/null
+        echo -n " done."
+    fi
 }
 
 setup_loopback() {
@@ -96,6 +111,21 @@ check_requirements() {
         fi
     done
 
+    if [ ! -e /proc/sys/fs/binfmt_misc/arm ]; then
+        echo 'No handler set up for ARM binaries.  I will do that for you.'
+        $SUDO ./arm-qemu-binfmt.sh
+    else
+        arm_interp_path=$(awk '/^interpreter/{ print $2 }' /proc/sys/fs/binfmt_misc/arm)
+        arm_interp_name=$(basename $arm_interp_path)
+        if [ "$arm_interp_name" != "$QEMU_STATIC" ]; then
+            echo "We want to use '$QEMU_STATIC' to run ARM binaries in the chroot, but" >&2
+            echo "your system is set up to use '$arm_interp_name'.  Please fix this" >&2
+            echo "and restart this script." >&2
+            exit 1
+        fi
+        ARM_INTERP_DIR=$(dirname $arm_interp_path)
+    fi
+
     if [ ! -x $TOOLCHAIN_BIN/$RPI_CHOST-gcc ]; then
         if type crossdev &>/dev/null; then
             echo "No toolchain found; building one..."
@@ -112,12 +142,8 @@ check_requirements() {
 
 fetch_dependencies() {
     pushd $DOWNLOADS
-    if [ ! -e "$(basename $(get_stage3_url))" ]; then
-        curl -O $(get_stage3_url)
-    fi
-    if [ ! -e "$(basename $PORTAGE_SNAPSHOT_URL)" ]; then
-        curl -O $PORTAGE_SNAPSHOT_URL
-    fi
+    url_fetch $(get_stage3_url)
+    url_fetch $PORTAGE_SNAPSHOT_URL
     popd
 
     pushd $SOURCES
@@ -128,8 +154,9 @@ fetch_dependencies() {
 }
 
 build_kernel() {
-    if [ ! -f linux/arch/arm/boot/Image ]; then
-        pushd linux
+    if [ ! -f $SOURCES/linux/arch/arm/boot/Image ]; then
+        pushd $SOURCES/linux
+        echo "Building kernel..."
         ARCH=arm $MAKE bcmrpi_cutdown_defconfig
         ARCH=arm CROSS_COMPILE=$TOOLCHAIN_BIN/$RPI_CHOST- $MAKE oldconfig
         ARCH=arm CROSS_COMPILE=$TOOLCHAIN_BIN/$RPI_CHOST- $MAKE -j$NCPUS
@@ -138,30 +165,52 @@ build_kernel() {
 }
 
 build_bootfs() {
+    echo
+    echo "Assembling boot file system"
+    echo
+
     for f in $BOOT_FILES; do
         cp -a $SOURCES/firmware/boot/$f $BOOTFS
     done
     pushd overlays/boot
-    rsync -a . $BOOTFS
+    $SUDO rsync -a . $BOOTFS
     popd
     pushd $SOURCES/tools/mkimage
     $PYTHON imagetool-uncompressed.py $SOURCES/linux/arch/arm/boot/Image
     mv kernel.img $BOOTFS
-    pushd
+    popd
 }
 
 build_rootfs() {
+    echo
+    echo "Assembling root filesystem"
+    echo
+
+    echo -n "Unpacking stage3 tarball..."
     $SUDO tar xjf $DOWNLOADS/$(basename $(get_stage3_url)) -C $ROOTFS
+    echo " done."
+    echo -n "Unpacking portage snapshot..."
     $SUDO tar xjf $DOWNLOADS/$(basename $PORTAGE_SNAPSHOT_URL) -C $ROOTFS/usr
+    echo " done".
+
     pushd overlays/rootfs
-    rsync -a . $ROOTFS
-    popd
-    pushd $SOURCES/linux
-    $SUDO env ARCH=arm CROSS_COMPILE=$TOOLCHAIN_BIN/$RPI_CHOST- $MAKE modules_install INSTALL_MOD_PATH=$ROOTFS
+    echo -n "Copying rootfs overlay..."
+    $SUDO rsync -a . $ROOTFS &>/dev/null
+    echo " done."
     popd
 
+    pushd $SOURCES/linux
+    echo -n "Installing kernel modules..."
+    $SUDO env ARCH=arm CROSS_COMPILE=$TOOLCHAIN_BIN/$RPI_CHOST- $MAKE modules_install INSTALL_MOD_PATH=$ROOTFS &>/dev/null
+    echo " done."
+    popd
+}
+
+bootstrap_rootfs() {
+    echo "Chrooting into rootfs to do second-stage bootstrap..."
+
     $SUDO cp bootstrap.sh $ROOTFS
-    $SUDO cp $QEMU_STATIC $ROOTFS/bin
+    $SUDO cp $(which $QEMU_STATIC 2>/dev/null) $ROOTFS/$ARM_INTERP_DIR
     $SUDO cp /etc/resolv.conf $ROOTFS/etc
 
     $SUDO mount -t proc proc $ROOTFS/proc
@@ -181,6 +230,8 @@ build_rootfs() {
 }
 
 prepare_disk_image() {
+    echo "Preparing disk image..."
+
     MBR_SIZE=512
     BOOTFS_START=$MBR_SIZE
     BOOTFS_END=$(expr $BOOTFS_START + $BOOTFS_SIZE - 1)
@@ -197,6 +248,8 @@ prepare_disk_image() {
 }
 
 populate_disk_image() {
+    echo "Populating disk image..."
+
     mkdir -p $BOOTFS.mnt
     dev=$(setup_loopback $DISK_IMAGE 1)
     $SUDO mkfs.vfat -n boot -f 2 -F 32 $dev
@@ -227,11 +280,12 @@ if [ -z "$1" ]; then
         build_kernel \
         build_bootfs \
         build_rootfs \
+        bootstrap_rootfs \
         prepare_disk_image \
         populate_disk_image \
     "
 else
-    operations="$1"
+    operations="check_requirements $1"
 fi
 
 for o in $operations; do
