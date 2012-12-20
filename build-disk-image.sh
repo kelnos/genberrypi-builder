@@ -36,6 +36,7 @@ PACKAGES="\
     eselect-opengl \
     gentoolkit \
     ifplugd \
+    net-mdns \
     nfs-utils \
     ntp \
     rpi-userland \
@@ -310,6 +311,7 @@ prepare_rootfs() {
     $SUDO mkdir -p $ROOTFS/etc/portage/package.keywords
     cat <<EOF | $SUDO tee $ROOTFS/etc/portage/package.keywords/rpi-bootstrap &>/dev/null
 sys-apps/ifplugd
+sys-auth/nss-mdns **
 sys-libs/rpi-userland
 EOF
     $SUDO mkdir -p $ROOTFS/etc/portage/package.mask
@@ -388,6 +390,10 @@ echo -e \"raspberry\nraspberry\" | passwd rpi
 
     # sudo access; gotta do this *after* sudo gets installed
     echo '%wheel ALL=(ALL) NOPASSWD: ALL' | $SUDO tee -a $ROOTFS/etc/sudoers >/dev/null
+
+    # enable multicast dns resolution.  i really don't understand why
+    # everyone doesn't do this by default nowadays.
+    $SUDO sed -i -e 's/^\(hosts:\s\+\).*/\1files mdns4_minimal [NOTFOUND=return] dns mdns4/' $ROOTFS/etc/nsswitch.conf
 
     $SUDO rm -rf $ROOTFS/usr/portage/distfiles/*
     if [ $ROOTFS/boot/* != $ROOTFS/boot/\* ]; then
