@@ -285,24 +285,12 @@ prepare_rootfs() {
     echo 'UTC' | $SUDO tee $ROOTFS/etc/timezone &>/dev/null
 
     $SUDO ln -sf net.lo $ROOTFS/etc/init.d/net.eth0
-    $SUDO sed -i -e 's/^hostname=.*$/hostname="genberrypi"/' $ROOTFS/etc/conf.d/hostname
-    $SUDO sed -i -e 's/^127\.0\.0\.1.*/127.0.0.1\tgenberrypi localhost/' $ROOTFS/etc/hosts
-
-    # RPi doesn't have an RTC
-    $SUDO sed -i -e 's/^#\?clock_hctosys=.*/clock_hctosys="NO"/' $ROOTFS/etc/conf.d/hwclock
-    $SUDO sed -i -e 's/^#\?clock_systohc=.*/clock_systohc="NO"/' $ROOTFS/etc/conf.d/hwclock
 
     echo "USE='-acl -cups -dbus -gtk -gtk3 -introspection -nls -qt -qt3 -qt4 -X'" | $SUDO tee -a $ROOTFS/etc/make.conf &>/dev/null
     echo "PORTDIR_OVERLAY=/usr/local/portage" | $SUDO tee -a $ROOTFS/etc/make.conf &>/dev/null
 
     # don't generate all locales
     $SUDO sed -i -e 's/^#en_US.UTF-8 UTF-8$/en_US.UTF-8 UTF-8/' $ROOTFS/etc/locale.gen
-
-    # modules
-    echo 'modules="snd-bcm2835"' | $SUDO tee -a $ROOTFS/etc/conf.d/modules &>/dev/null
-
-    # correct serial console port and speed for getty
-    $SUDO sed -i -e '/^s0:/s/ttyS0/ttyAMA0/; /^s0:/s/9600/115200/' $ROOTFS/etc/inittab
 
     # more correct CFLAGS
     $SUDO sed -i -e "s/-march=[^ ]\+/-mcpu=$RPI_CPU/g" $ROOTFS/etc/make.conf
@@ -314,6 +302,9 @@ sys-apps/ifplugd
 sys-auth/nss-mdns **
 sys-libs/rpi-userland
 EOF
+    # for some reason linux-headers-3.6 is missing a header that net-tools
+    # needs.  we don't really want to go over to eudev yet, but some packages
+    # seem to get a little confused and try to pull both udev and eudev in.
     $SUDO mkdir -p $ROOTFS/etc/portage/package.mask
     cat <<EOF | $SUDO tee $ROOTFS/etc/portage/package.mask/rpi-bootstrap &>/dev/null
 =sys-kernel/linux-headers-3.6
@@ -387,6 +378,26 @@ passwd -l root
 useradd -m rpi -G adm,audio,video,wheel
 echo -e \"raspberry\nraspberry\" | passwd rpi
 "
+    # some of this stuff is here to avoid 'updated conf file' messages
+    # after all the emerging we do above.
+
+    # set a reasonable hostname
+    $SUDO sed -i -e 's/^hostname=.*$/hostname="genberrypi"/' $ROOTFS/etc/conf.d/hostname
+    $SUDO sed -i -e 's/^127\.0\.0\.1.*/127.0.0.1\tgenberrypi localhost/' $ROOTFS/etc/hosts
+
+    # RPi doesn't have an RTC
+    $SUDO sed -i -e 's/^#\?clock_hctosys=.*/clock_hctosys="NO"/' $ROOTFS/etc/conf.d/hwclock
+    $SUDO sed -i -e 's/^#\?clock_systohc=.*/clock_systohc="NO"/' $ROOTFS/etc/conf.d/hwclock
+
+    # modules: sound!
+    echo 'modules="snd-bcm2835"' | $SUDO tee -a $ROOTFS/etc/conf.d/modules &>/dev/null
+
+    # correct serial console port and speed for getty
+    $SUDO sed -i -e '/^s0:/s/ttyS0/ttyAMA0/; /^s0:/s/9600/115200/' $ROOTFS/etc/inittab
+    # really don't need 6 vc gettys
+    for i in 3 4 5 6; do
+        $SUDO sed -i -e "s/^c$i:/#c$i:/" $ROOTFS/etc/inittab
+    done
 
     # sudo access; gotta do this *after* sudo gets installed
     echo '%wheel ALL=(ALL) NOPASSWD: ALL' | $SUDO tee -a $ROOTFS/etc/sudoers >/dev/null
