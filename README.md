@@ -156,8 +156,8 @@ create your own swap partition later in the remaining space, or you can
 create swap files and put them on the rootfs.  Or you can add (optional!)
 support to the script and send me a patch.
 
-As a note, after a fresh boot, the system is using about 150MB of RAM, with
-about 295MB free.  The kernel and GPU eat the rest.
+As a note, after a fresh boot, the system is using about 20MB of RAM, with
+about 420MB free.  The kernel and GPU eat the rest.
 
 ### Tweaks ###
 
