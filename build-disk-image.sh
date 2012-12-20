@@ -267,7 +267,7 @@ build_kernel() {
 }
 
 build_kernels() {
-    for configsuffix in '' _cutdown _emergency _quick; do
+    for configsuffix in '' _cutdown _quick; do
         if [ ! -f "$KERNELBIN/kernel${configsuffix}.img" ]; then
             build_kernel $configsuffix
         fi
