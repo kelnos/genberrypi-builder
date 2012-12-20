@@ -5,6 +5,9 @@
 EAPI=4
 
 EGIT_REPO_URI="git://github.com/raspberrypi/userland.git"
+if use rpi-experimental; then
+	EGIT_BRANCH="next"
+fi
 
 inherit git-2 multilib
 
@@ -14,7 +17,7 @@ HOMEPAGE="https://github.com/raspberrypi/userland"
 LICENSE="BSD"
 SLOT="0"
 KEYWORDS="~arm"
-IUSE=""
+IUSE="rpi-experimental"
 
 RDEPEND=""
 DEPEND="
@@ -27,13 +30,10 @@ src_prepare() {
 	sed -e "s/arm-linux-gnueabihf/${CHOST}/g" \
 		"${S}/makefiles/cmake/toolchains/arm-linux-gnueabihf.cmake" \
 		>"${S}/makefiles/cmake/toolchains/${CHOST}.cmake" || die "sed failed"
-	sed -i -e "s/arm-linux-gnueabihf/${CHOST}/g" "${S}/buildme"
-	#sed -i -e 's/-j 6/VERBOSE=1/' "${S}/buildme"
 }
 
 src_compile() {
 	cd "${S}"
-#	./buildme || die "build failed"
 	mkdir -p "${S}/build/arm-linux/release"
 	cd "${S}/build/arm-linux/release"
 	cmake \

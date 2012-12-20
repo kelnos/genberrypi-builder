@@ -173,6 +173,14 @@ highlights:
 * `cmdline=` -- sets the command line passed to the kernel
 * `arm_freq=` -- lets you overclock (and possibly) underclock the CPU
 
+If you use the 3.6.x kernel and LKG62 (or above) GPU firmware,
+there's apparently support for runtime dynamic allocation of memory
+between the CPU and GPU.  Which is pretty damn cool, if you ask me.
+I haven't had a chance to test this, or play around with the newer
+kernel yet, so it's not enabled.  If you're truly adventurous, you
+can set `RPI_USE_EXPERIMENTAL` to something non-blank and it'll
+build you some cool goodies.
+
 ## Acknowledgements ##
 
 Well, I did write this monster of a script all by my lonesome, but I do

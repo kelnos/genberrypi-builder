@@ -28,6 +28,9 @@ RPI_KERNEL_GIT_REPO=git://github.com/raspberrypi/linux.git
 RPI_TOOLS_GIT_REPO=git://github.com/raspberrypi/tools.git
 RPI_FIRMWARE_GIT_REPO=git://github.com/raspberrypi/firmware.git
 
+EXPERIMENTAL_KERNEL_BRANCH='rpi-3.6.y'
+EXPERIMENTAL_FIRMWARE_BRANCH='next'
+
 PACKAGES="\
     alsa-lib \
     alsa-utils \
@@ -140,6 +143,19 @@ git_fetch() {
     return $ret
 }
 
+git_refresh_branch() {
+    pushd $1
+    if ! git branch | grep -q "* $2"; then
+        if git branch | grep -q "$2"; then
+            git checkout $2
+        else
+            git checkout -t origin/$2
+        fi
+        git pull
+    fi
+    popd
+}
+
 url_fetch() {
     url=$1
     filename=$(basename "$url")
@@ -225,6 +241,11 @@ fetch_dependencies() {
     git_fetch $RPI_FIRMWARE_GIT_REPO || true
     git_fetch $RPI_TOOLS_GIT_REPO || true
     popd
+
+    if [ -n "$RPI_USE_EXPERIMENTAL" ]; then
+        git_refresh_branch $SOURCES/linux $EXPERIMENTAL_KERNEL_BRANCH
+        git_refresh_branch $SOURCES/firmware $EXPERIMENTAL_FIRMWARE_BRANCH
+    fi
 }
 
 build_kernel() {
@@ -289,7 +310,11 @@ prepare_rootfs() {
 
     $SUDO ln -sf net.lo $ROOTFS/etc/init.d/net.eth0
 
-    echo "USE='-acl -cups -dbus -gtk -gtk3 -introspection -nls -qt -qt3 -qt4 -X'" | $SUDO tee -a $ROOTFS/etc/make.conf &>/dev/null
+    if [ -n "$RPI_USE_EXPERIMENTAL" ]; then
+        use_exp='rpi-experimental '
+    fi
+
+    echo "USE='${use_exp}-acl -cups -dbus -gtk -gtk3 -introspection -nls -qt -qt3 -qt4 -X'" | $SUDO tee -a $ROOTFS/etc/make.conf &>/dev/null
     echo "PORTDIR_OVERLAY=/usr/local/portage" | $SUDO tee -a $ROOTFS/etc/make.conf &>/dev/null
 
     # don't generate all locales
