@@ -190,7 +190,7 @@ run_in_chroot() {
 
     $SUDO umount -fl $ROOTFS/{proc,sys,dev,boot}
     trap - EXIT
-    $SUDO rm -f $ROOTFS/bin/$(basename $QEMU_STATIC) $ROOTFS/etc/resolv.conf
+    $SUDO rm -f $ROOTFS/$ARM_INTERP_DIR/$QEMU_STATIC $ROOTFS/etc/resolv.conf
 }
 
 check_requirements() {
@@ -204,17 +204,17 @@ check_requirements() {
     if [ ! -e /proc/sys/fs/binfmt_misc/arm ]; then
         echo 'No handler set up for ARM binaries.  I will do that for you.'
         $SUDO ./arm-qemu-binfmt.sh
-    else
-        arm_interp_path=$(awk '/^interpreter/{ print $2 }' /proc/sys/fs/binfmt_misc/arm)
-        arm_interp_name=$(basename $arm_interp_path)
-        if [ "$arm_interp_name" != "$QEMU_STATIC" ]; then
-            echo "We want to use '$QEMU_STATIC' to run ARM binaries in the chroot, but" >&2
-            echo "your system is set up to use '$arm_interp_name'.  Please fix this" >&2
-            echo "and restart this script." >&2
-            exit 1
-        fi
-        ARM_INTERP_DIR=$(dirname $arm_interp_path)
     fi
+
+    arm_interp_path=$(awk '/^interpreter/{ print $2 }' /proc/sys/fs/binfmt_misc/arm)
+    arm_interp_name=$(basename $arm_interp_path)
+    if [ "$arm_interp_name" != "$QEMU_STATIC" ]; then
+        echo "We want to use '$QEMU_STATIC' to run ARM binaries in the chroot, but" >&2
+        echo "your system is set up to use '$arm_interp_name'.  Please fix this" >&2
+        echo "and restart this script." >&2
+        exit 1
+    fi
+    ARM_INTERP_DIR=$(dirname $arm_interp_path)
 
     if [ ! -x $TOOLCHAIN_BIN/$RPI_CHOST-gcc ]; then
         if type crossdev &>/dev/null; then
