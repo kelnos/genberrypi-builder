@@ -43,6 +43,8 @@ src_compile() {
 }
 
 src_install() {
+	newinitd "${FILESDIR}"/init.d vcfiled
+
 	OPENGL_DIR="/usr/$(get_libdir)/opengl/rpi-broadcom"
 	mkdir -p "${D}/${OPENGL_DIR}"
 	mkdir -p "${D}/${OPENGL_DIR}"/include
@@ -65,7 +67,6 @@ src_install() {
 	dobin vchiq_test
 
 	cd "${S}"/build
-	doinitd arm-linux/release/etc/init.d/vcfiled
 	into /
 	dosbin bin/vcfiled
 
