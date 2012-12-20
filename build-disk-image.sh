@@ -20,6 +20,7 @@ NCPUS=$(grep '^processor' /proc/cpuinfo | wc -l)
 
 DOWNLOADS=$STAGING_ROOT/dl
 SOURCES=$STAGING_ROOT/src
+KERNELBIN=$STAGING_ROOT/build/kernel
 BOOTFS=$STAGING_ROOT/build/boot
 ROOTFS=$STAGING_ROOT/build/rootfs
 DISK_IMAGE=$STAGING_ROOT/build/gentoo-raspi-$(date +%Y%d%m).img
@@ -90,8 +91,6 @@ BOOT_FILES="
     LICENCE.broadcom
     bootcode.bin
     fixup.dat
-    kernel_cutdown.img
-    kernel_emergency.img
     start.elf
 "
 
@@ -227,7 +226,7 @@ check_requirements() {
         fi
     fi
 
-    mkdir -p $STAGING_ROOT $DOWNLOADS $SOURCES $BOOTFS $ROOTFS
+    mkdir -p $STAGING_ROOT $DOWNLOADS $SOURCES $KERNELBIN $BOOTFS $ROOTFS
 }
 
 fetch_dependencies() {
@@ -237,7 +236,7 @@ fetch_dependencies() {
     popd
 
     pushd $SOURCES
-    git_fetch $RPI_KERNEL_GIT_REPO || rm -f linux/arch/arm/boot/Image
+    git_fetch $RPI_KERNEL_GIT_REPO || rm -f $KERNELBIN/*.img
     git_fetch $RPI_FIRMWARE_GIT_REPO || true
     git_fetch $RPI_TOOLS_GIT_REPO || true
     popd
@@ -249,14 +248,30 @@ fetch_dependencies() {
 }
 
 build_kernel() {
-    if [ ! -f $SOURCES/linux/arch/arm/boot/Image ]; then
-        pushd $SOURCES/linux
-        echo "Building kernel..."
-        ARCH=arm $MAKE bcmrpi_cutdown_defconfig
-        ARCH=arm CROSS_COMPILE=$TOOLCHAIN_BIN/$RPI_CHOST- $MAKE oldconfig
-        ARCH=arm CROSS_COMPILE=$TOOLCHAIN_BIN/$RPI_CHOST- $MAKE -j$NCPUS
-        popd
-    fi
+    configsuffix=$1
+    fullconfig="bcmrpi${configsuffix}_defconfig"
+
+    pushd $SOURCES/linux
+    echo "Building kernel with config $fullconfig..."
+    ARCH=arm CROSS_COMPILE=$TOOLCHAIN_BIN/$RPI_CHOST- $MAKE clean
+    ARCH=arm $MAKE $fullconfig
+    ARCH=arm CROSS_COMPILE=$TOOLCHAIN_BIN/$RPI_CHOST- $MAKE oldconfig
+    ARCH=arm CROSS_COMPILE=$TOOLCHAIN_BIN/$RPI_CHOST- $MAKE -j$NCPUS
+    ARCH=arm CROSS_COMPILE=$TOOLCHAIN_BIN/$RPI_CHOST- $MAKE modules_install INSTALL_MOD_PATH=$KERNELBIN
+    popd
+
+    pushd $SOURCES/tools/mkimage
+    $PYTHON imagetool-uncompressed.py $SOURCES/linux/arch/arm/boot/Image
+    mv kernel.img "$KERNELBIN/kernel${configsuffix}.img"
+    popd
+}
+
+build_kernels() {
+    for configsuffix in '' _cutdown _emergency _quick; do
+        if [ ! -f "$KERNELBIN/kernel${configsuffix}.img" ]; then
+            build_kernel $configsuffix
+        fi
+    done
 }
 
 build_bootfs() {
@@ -270,10 +285,8 @@ build_bootfs() {
     pushd overlays/boot
     $SUDO rsync -a . $BOOTFS
     popd
-    pushd $SOURCES/tools/mkimage
-    $PYTHON imagetool-uncompressed.py $SOURCES/linux/arch/arm/boot/Image
-    mv kernel.img $BOOTFS
-    popd
+
+    cp $KERNELBIN/*.img $BOOTFS
 }
 
 build_rootfs() {
@@ -298,8 +311,9 @@ build_rootfs() {
     popd
 
     pushd $SOURCES/linux
-    echo -n "Installing kernel modules..."
-    $SUDO env ARCH=arm CROSS_COMPILE=$TOOLCHAIN_BIN/$RPI_CHOST- $MAKE modules_install INSTALL_MOD_PATH=$ROOTFS &>/dev/null
+    echo -n "Installing kernel modules & firmware..."
+    mkdir -p $ROOTFS/lib
+    $SUDO cp -a $KERNELBIN/lib/* $ROOTFS/lib
     echo " done."
     popd
 }
@@ -491,7 +505,7 @@ if [ -z "$1" ]; then
     operations="\
         check_requirements \
         fetch_dependencies \
-        build_kernel \
+        build_kernels \
         build_bootfs \
         build_rootfs \
         prepare_rootfs \
