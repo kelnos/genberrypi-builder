@@ -68,8 +68,11 @@ PROBLEMATIC_PACKAGES="\
     openrc \
 "
 
-ENABLED_SERVICES="\
+SERVICES_BOOT="\
     alsasound \
+"
+
+SERVICES_DEFAULT="\
     avahi-daemon \
     net.eth0 \
     ntpd \
@@ -365,7 +368,11 @@ emerge --usepkgonly --emptytree $PACKAGES
 # just allow it to auto-merge trivial stuff
 etc-update -p
 
-for svc in $ENABLED_SERVICES; do
+for svc in $SERVICES_BOOT; do
+    rc-update add \$svc boot
+done
+
+for svc in $SERVICES_DEFAULT; do
     rc-update add \$svc default
 done
 
