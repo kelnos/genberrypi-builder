@@ -3,10 +3,12 @@
 set -e
 
 : ${SUDO:=sudo}
-: ${RPI_CHOST:=armv6j-hardfloat-linux-gnueabi}
+: ${RPI_ARCH:=armv6j}
+: ${RPI_CPU:=arm1176jzf-s}
+: ${RPI_CHOST:=${RPI_ARCH}-hardfloat-linux-gnueabi}
 : ${TOOLCHAIN_BIN:=/usr/bin}
 : ${QEMU_STATIC:=qemu-arm}
-: ${PYTHON:= python}
+: ${PYTHON:=python}
 : ${MAKE:=make}
 
 : ${DISK_IMAGE_SIZE:= 4294967296}  # 4GB
@@ -26,23 +28,75 @@ RPI_KERNEL_GIT_REPO=git://github.com/raspberrypi/linux.git
 RPI_TOOLS_GIT_REPO=git://github.com/raspberrypi/tools.git
 RPI_FIRMWARE_GIT_REPO=git://github.com/raspberrypi/firmware.git
 
-BOOT_FILES="\
-    COPYING.linux \
-    LICENCE.broadcom \
-    bootcode.bin \
-    fixup.dat \
-    kernel_cutdown.img \
-    kernel_emergency.img \
-    start.elf \
+PACKAGES="\
+    alsa-lib \
+    alsa-utils \
+    avahi \
+    dhcpcd \
+    eselect-opengl \
+    gentoolkit \
+    ifplugd \
+    nfs-utils \
+    ntp \
+    rpi-userland \
+    samba \
+    app-misc/screen \
+    sudo \
+    sysklogd \
+    vim \
+    vixie-cron \
 "
 
-HOST_BINARIES="\
-    curl \
-    git \
-    losetup \
-    parted \
-    $QEMU_STATIC \
-    rsync \
+CROSS_COMPILE_HALL_OF_SHAME="\
+    alsa-utils \
+    coreutils \
+    dialog \
+    elfutils \
+    gdbm \
+    mpc \
+    pam \
+    perl \
+    <python-3.0.0 \
+    >=python-3.0.0 \
+    rpcbind \
+    samba \
+"
+
+PROBLEMATIC_PACKAGES="\
+    net-tools \
+    openrc \
+"
+
+ENABLED_SERVICES="\
+    alsasound \
+    avahi-daemon \
+    net.eth0 \
+    ntpd \
+    sshd \
+    sysklogd \
+    vcfiled \
+    vixie-cron \
+"
+
+BOOT_FILES="
+    COPYING.linux
+    LICENCE.broadcom
+    bootcode.bin
+    fixup.dat
+    kernel_cutdown.img
+    kernel_emergency.img
+    start.elf
+"
+
+HOST_BINARIES="
+    crossdev
+    curl
+    git
+    losetup
+    mkfs.vfat
+    parted
+    $QEMU_STATIC
+    rsync
 "
 
 STAGE3_URL_PREFIX=http://distfiles.gentoo.org/releases/arm/autobuilds
@@ -89,7 +143,7 @@ url_fetch() {
     if [ ! -e "$filename" ]; then
         echo -n "Fetching $url..."
         curl -O "$url" &>/dev/null
-        echo -n " done."
+        echo " done."
     fi
 }
 
@@ -101,6 +155,22 @@ setup_loopback() {
     size=${size%%B}
     dev=$($SUDO losetup -o $offset --sizelimit $size -f --show $1 2>/dev/null)
     echo $dev
+}
+
+run_in_chroot() {
+    $SUDO cp $(which $QEMU_STATIC 2>/dev/null) $ROOTFS/$ARM_INTERP_DIR
+    $SUDO cp /etc/resolv.conf $ROOTFS/etc
+    $SUDO mount -t proc proc $ROOTFS/proc
+    $SUDO mount --rbind /sys $ROOTFS/sys
+    $SUDO mount --rbind /dev $ROOTFS/dev
+    $SUDO mount --rbind $BOOTFS $ROOTFS/boot
+    trap "$SUDO umount -fl $ROOTFS/{proc,sys,dev,boot} || true" EXIT
+
+    $SUDO chroot $ROOTFS "$@"
+
+    $SUDO umount -fl $ROOTFS/{proc,sys,dev,boot}
+    trap - EXIT
+    $SUDO rm -f $ROOTFS/bin/$(basename $QEMU_STATIC) $ROOTFS/etc/resolv.conf
 }
 
 check_requirements() {
@@ -191,7 +261,10 @@ build_rootfs() {
     echo " done."
     echo -n "Unpacking portage snapshot..."
     $SUDO tar xjf $DOWNLOADS/$(basename $PORTAGE_SNAPSHOT_URL) -C $ROOTFS/usr
-    echo " done".
+    echo " done."
+
+    # weird.
+    $SUDO ln -sfn ../usr/portage/profiles/default/linux/arm/10.0 $ROOTFS/etc/make.profile
 
     pushd overlays/rootfs
     echo -n "Copying rootfs overlay..."
@@ -206,23 +279,116 @@ build_rootfs() {
     popd
 }
 
+prepare_rootfs() {
+    $SUDO cp $ROOTFS/usr/share/zoneinfo/UTC $ROOTFS/etc/localtime
+    echo 'UTC' | $SUDO tee $ROOTFS/etc/timezone &>/dev/null
+
+    $SUDO ln -sf net.lo $ROOTFS/etc/init.d/net.eth0
+    $SUDO sed -i -e 's/^hostname=.*$/hostname="genberrypi"/' $ROOTFS/etc/conf.d/hostname
+    $SUDO sed -i -e 's/^127\.0\.0\.1.*/127.0.0.1\tgenberrypi localhost/' $ROOTFS/etc/hosts
+
+    # RPi doesn't have an RTC
+    $SUDO sed -i -e 's/^#\?clock_hctosys=.*/clock_hctosys="NO"/' $ROOTFS/etc/conf.d/hwclock
+    $SUDO sed -i -e 's/^#\?clock_systohc=.*/clock_systohc="NO"/' $ROOTFS/etc/conf.d/hwclock
+
+    echo "USE='-acl -cups -dbus -gtk -gtk3 -introspection -nls -qt -qt3 -qt4 -X'" | $SUDO tee -a $ROOTFS/etc/make.conf &>/dev/null
+    echo "PORTDIR_OVERLAY=/usr/local/portage" | $SUDO tee -a $ROOTFS/etc/make.conf &>/dev/null
+
+    # don't generate all locales
+    $SUDO sed -i -e 's/^#en_US.UTF-8 UTF-8$/en_US.UTF-8 UTF-8/' $ROOTFS/etc/locale.gen
+
+    # modules
+    echo 'modules="snd-bcm2835"' | $SUDO tee -a $ROOTFS/etc/conf.d/modules &>/dev/null
+
+    # correct serial console port and speed for getty
+    $SUDO sed -i -e '/^s0:/s/ttyS0/ttyAMA0/; /^s0:/s/9600/115200/' $ROOTFS/etc/inittab
+
+    # more correct CFLAGS
+    $SUDO sed -i -e "s/-march=[^ ]\+/-mcpu=$RPI_CPU/g" $ROOTFS/etc/make.conf
+
+    # i really don't like this
+    $SUDO mkdir -p $ROOTFS/etc/portage/package.keywords
+    cat <<EOF | $SUDO tee $ROOTFS/etc/portage/package.keywords/rpi-bootstrap &>/dev/null
+sys-apps/ifplugd
+sys-libs/rpi-userland
+EOF
+    $SUDO mkdir -p $ROOTFS/etc/portage/package.mask
+    cat <<EOF | $SUDO tee $ROOTFS/etc/portage/package.mask/rpi-bootstrap &>/dev/null
+=sys-kernel/linux-headers-3.6
+sys-fs/eudev
+EOF
+
+    run_in_chroot emerge --sync
+}
+
+# don't use this.  it doesn't work.
+change_rootfs_chost() {
+    old_chost=$(source $ROOTFS/etc/make.conf && echo $CHOST)
+    if [ "$old_chost" != "$RPI_CHOST" ]; then
+        echo "Changing CHOST from $old_chost to $RPI_CHOST..."
+
+        $SUDO sed -i -e "s/^CHOST=.*/CHOST=$RPI_CHOST/" $ROOTFS/etc/make.conf
+        $SUDO sed -i -e "s/-march=[^ ]\+/-mcpu=$RPI_CPU/g" $ROOTFS/etc/make.conf
+
+        $SUDO emerge-wrapper --init
+        $SUDO env CHOST=$RPI_CHOST CBUILD=$(gcc -dumpmachine) ROOT=/usr/$RPI_CHOST PORTAGE_CONFIGROOT=$ROOTFS MAKEOPTS="-j$NCPUS" PORTDIR_OVERLAY=$ROOTFS/usr/local/portage PKGDIR=$ROOTFS/usr/portage/packages $RPI_CHOST-emerge --buildpkg --oneshot --usepkg binutils gcc glibc || \
+            { \
+               run_in_chroot env MAKEOPTS="-j$NCPUS" emerge --oneshot --buildpkg mpc && \
+               $SUDO env CHOST=$RPI_CHOST CBUILD=$(gcc -dumpmachine) ROOT=/usr/$RPI_CHOST PORTAGE_CONFIGROOT=$ROOTFS MAKEOPTS="-j$NCPUS" PORTDIR_OVERLAY=$ROOTFS/usr/local/portage PKGDIR=$ROOTFS/usr/portage/packages $RPI_CHOST-emerge --buildpkg --oneshot --usepkg binutils gcc glibc; \
+            }
+        run_in_chroot env MAKEOPTS="-j$NCPUS" emerge --oneshot --usepkgonly binutils gcc glibc
+        $SUDO rm -f \
+            $ROOTFS/etc/env.d/*gcc-$OLD_CHOST \
+            $ROOTFS/etc/env.d/binutils/*$OLD_CHOST* \
+            $ROOTFS/etc/env.d/gcc/*$OLD_CHOST*
+    fi
+}
+
+crossbuild_packages() {
+    echo "Cross-building packages..."
+
+    NCPUS=$(grep '^processor' /proc/cpuinfo | wc -l)
+    $SUDO mkdir -p $ROOTFS/usr/portage/packages
+
+    # some packages hate cross-building, so build them in the chroot
+    run_in_chroot /usr/bin/env MAKEOPTS="-j$NCPUS" emerge --buildpkg --usepkg --oneshot $CROSS_COMPILE_HALL_OF_SHAME
+
+    $SUDO emerge-wrapper --init
+    $SUDO env CHOST=$RPI_CHOST CBUILD=$(gcc -dumpmachine) ROOT=/usr/$RPI_CHOST PORTAGE_CONFIGROOT=$ROOTFS MAKEOPTS="-j$NCPUS" PORTDIR_OVERLAY=$ROOTFS/usr/local/portage PKGDIR=$ROOTFS/usr/portage/packages $RPI_CHOST-emerge --buildpkg --oneshot --usepkg system
+    $SUDO env CHOST=$RPI_CHOST CBUILD=$(gcc -dumpmachine) ROOT=/usr/$RPI_CHOST PORTAGE_CONFIGROOT=$ROOTFS MAKEOPTS="-j$NCPUS" PORTDIR_OVERLAY=$ROOTFS/usr/local/portage PKGDIR=$ROOTFS/usr/portage/packages $RPI_CHOST-emerge --emptytree --buildpkg --usepkg $PACKAGES
+}
+
 bootstrap_rootfs() {
     echo "Chrooting into rootfs to do second-stage bootstrap..."
 
-    $SUDO cp bootstrap.sh $ROOTFS
-    $SUDO cp $(which $QEMU_STATIC 2>/dev/null) $ROOTFS/$ARM_INTERP_DIR
-    $SUDO cp /etc/resolv.conf $ROOTFS/etc
+    run_in_chroot /bin/bash -e -c "
+env-update
+source /etc/profile
 
-    $SUDO mount -t proc proc $ROOTFS/proc
-    $SUDO mount --rbind /sys $ROOTFS/sys
-    $SUDO mount --rbind /dev $ROOTFS/dev
-    $SUDO mount --rbind $BOOTFS $ROOTFS/boot
-    trap "$SUDO umount -fl $ROOTFS/{proc,sys,dev,boot} || true" INT QUIT TERM EXIT
-    $SUDO chroot $ROOTFS /bootstrap.sh
-    $SUDO umount -fl $ROOTFS/{proc,sys,dev,boot}
-    trap -
+emerge --usepkgonly $PROBLEMATIC_PACKAGES
+emerge --usepkgonly system
+emerge --usepkgonly --emptytree $PACKAGES
 
-    $SUDO rm $ROOTFS/bootstrap.sh $ROOTFS/bin/$(basename $QEMU_STATIC) $ROOTFS/etc/resolv.conf
+# just allow it to auto-merge trivial stuff
+etc-update -p
+
+for svc in $ENABLED_SERVICES; do
+    rc-update add \$svc default
+done
+
+eselect opengl set rpi-broadcom
+
+# don't allow root logins
+passwd -l root
+
+# create a regular user
+useradd -m rpi -G adm,audio,video,wheel
+echo -e \"raspberry\nraspberry\" | passwd rpi
+"
+
+    # sudo access; gotta do this *after* sudo gets installed
+    echo '%wheel ALL=(ALL) NOPASSWD: ALL' | $SUDO tee -a $ROOTFS/etc/sudoers >/dev/null
+
     $SUDO rm -rf $ROOTFS/usr/portage/distfiles/*
     if [ $ROOTFS/boot/* != $ROOTFS/boot/\* ]; then
         $SUDO mv $ROOTFS/boot/* $BOOTFS
@@ -244,7 +410,6 @@ prepare_disk_image() {
     parted $DISK_IMAGE -s -a minimal "mkpart primary fat32 ${BOOTFS_START}B ${BOOTFS_END}B"
     parted $DISK_IMAGE -s -a minimal "set 1 boot on"
     parted $DISK_IMAGE -s -a minimal "mkpart primary ext4 ${ROOTFS_START}B ${ROOTFS_END}B"
-    parted $DISK_IMAGE -s -a minimal "set 2 root on"
 }
 
 populate_disk_image() {
@@ -254,20 +419,20 @@ populate_disk_image() {
     dev=$(setup_loopback $DISK_IMAGE 1)
     $SUDO mkfs.vfat -n boot -f 2 -F 32 $dev
     $SUDO mount -o loop,noatime $dev $BOOTFS.mnt
-    trap "$SUDO umount -fl $BOOTFS.mnt; $SUDO losetup -D || true" INT TERM QUIT EXIT
-    $SUDO cp -a $BOOTFS/* $BOOTFS.mnt
+    trap "$SUDO umount -fl $BOOTFS.mnt; $SUDO losetup -D || true" EXIT
+    $SUDO cp -r $BOOTFS/* $BOOTFS.mnt
     $SUDO umount $BOOTFS.mnt
-    trap -
-    rmdir $(BOOTFS).mnt
+    trap - EXIT
+    rmdir $BOOTFS.mnt
 
     mkdir -p $ROOTFS.mnt
     dev=$(setup_loopback $DISK_IMAGE 2)
     $SUDO mkfs.ext4 -L rootfs -M / $dev
     $SUDO mount -o loop,noatime $dev $ROOTFS.mnt
-    trap "$SUDO umount -fl $ROOTFS.mnt; $SUDO losetup -D || true" INT TERM QUIT EXIT
+    trap "$SUDO umount -fl $ROOTFS.mnt; $SUDO losetup -D || true" EXIT
     $SUDO cp -a $ROOTFS/* $ROOTFS.mnt
     $SUDO umount $ROOTFS.mnt
-    trap -
+    trap - EXIT
     rmdir $ROOTFS.mnt
 
     $SUDO losetup -D || true
@@ -280,6 +445,8 @@ if [ -z "$1" ]; then
         build_kernel \
         build_bootfs \
         build_rootfs \
+        prepare_rootfs \
+        crossbuild_packages \
         bootstrap_rootfs \
         prepare_disk_image \
         populate_disk_image \
