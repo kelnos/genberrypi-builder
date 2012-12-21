@@ -40,7 +40,7 @@ PACKAGES="\
     eselect-opengl \
     gentoolkit \
     ifplugd \
-    net-mdns \
+    nss-mdns \
     nfs-utils \
     ntp \
     rpi-userland \
