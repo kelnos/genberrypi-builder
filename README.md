@@ -54,6 +54,37 @@ run a command that looks something like this:
 
     sudo dd if=<path_to_disk_image> of=/dev/<sdcard_device> bs=4M
 
+If you built a disk image smaller than your SD card, it's fastest to
+simply resize the root partition after writing it to the card (that is,
+if you make a giant disk image with lots of blank space, writing it
+out to the SD card will take forever).  Anyway, something like this
+should get you going:
+
+    $ sudo parted /dev/<sdcard_device>
+    (parted) unit b
+    (parted) print
+    # Note down the total size of the SD card (printed before the
+    # partition table) and *subtract 1 from it*, and the starting
+    # offset of partition 2. (We'll call them $END and $START,
+    # respecively.)
+    (parted) rm 2
+    (parted) mkpart primary ext4 $START $END
+    (parted) quit
+    $ sudo fsck -pfC /dev/<sdcard_device>2
+    $ sudo resize2fs -p /dev/<sdcard_device>2
+    $ sudo fsck -pfC /dev/<sdcard_device>2
+
+Plug your SD card into your Raspberry Pi, hook up a network cable
+(if you have the model with ethernet), and plug in power.
+
+The build enables multicast DNS broadcasts, so if your local machine
+is set up to be able to resolve via multicast DNS, you should be able to
+just do `ssh rpi@genberrypi.local`.  Otherwise you'll need a USB
+keyboard and monitor with HDMI.
+
+The username of the default user (which has `sudo` access) is `rpi`, and
+the password is `raspberry`.
+
 ## The Details ##
 
 The builder is not really the best.  It does some unfortunate things.
@@ -141,11 +172,11 @@ running the script.  Again: the size is in bytes.
 
 Your other option is to resize the filesystem after installing it, by first
 using `parted` to expand the partition to the full size of the SD card, and
-then using `resize2fs` to expand the filesystem.  This might be a better
-choice, as writing out a mostly-empty disk image to your SD card will
-take quite a while, whereas expanding a filesystem should be rather quick,
-since it only needs to write out some new superblocks and adjust some
-metadata.
+then using `resize2fs` to expand the filesystem.  This process is
+detailed above.  This might be a better choice, as writing out a
+mostly-empty disk image to your SD card will take quite a while, whereas
+expanding a filesystem should be rather quick, since it only needs to write
+out some new superblocks and adjust some metadata.
 
 ### Swap ###
 
