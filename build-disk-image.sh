@@ -74,10 +74,10 @@ PROBLEMATIC_PACKAGES="\
 
 SERVICES_BOOT="\
     alsasound \
+    avahi-daemon \
 "
 
 SERVICES_DEFAULT="\
-    avahi-daemon \
     net.eth0 \
     ntpd \
     sshd \
