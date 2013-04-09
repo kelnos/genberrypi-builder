@@ -134,7 +134,7 @@ git_fetch() {
         [ "$currev" = "$newrev" ] || ret=1
     else
         echo -n "Cloning git repo '$url'..."
-        git clone $url
+        git clone --depth=1 $url # shallow clone
         echo ' done.'
         ret=1
     fi
