@@ -161,7 +161,11 @@ url_fetch() {
 
     if [ ! -e "$filename" ]; then
         echo -n "Fetching $url..."
-        curl -O "$url" &>/dev/null
+	if type axel >/dev/null 2>&1 ; then # prefer axel over curl
+            axel -a "$url"
+	else # curl fallback
+            curl -O "$url" &>/dev/null
+	fi
         echo " done."
     fi
 }
@@ -353,6 +357,7 @@ EOF
 sys-fs/eudev
 EOF
 
+    run_in_chroot /usr/bin/emerge --sync
     run_in_chroot emerge --sync
 }
 
