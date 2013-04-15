@@ -299,7 +299,7 @@ build_rootfs() {
     echo
 
     echo -n "Unpacking stage3 tarball..."
-    $SUDO tar xjf $DOWNLOADS/$(basename $(get_stage3_url)) -C $ROOTFS
+    $SUDO tar xjfp $DOWNLOADS/$(basename $(get_stage3_url)) -C $ROOTFS
     echo " done."
     echo -n "Unpacking portage snapshot..."
     $SUDO tar xjf $DOWNLOADS/$(basename $PORTAGE_SNAPSHOT_URL) -C $ROOTFS/usr
