@@ -38,4 +38,7 @@
 #uncomment to overclock the arm. 700 MHz is the default.
 #arm_freq=800
 
+# minimize GPU memory impact
+gpu_mem=16
+
 # for more options see http://elinux.org/RPi_config.txt

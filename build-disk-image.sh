@@ -134,7 +134,7 @@ git_fetch() {
         [ "$currev" = "$newrev" ] || ret=1
     else
         echo -n "Cloning git repo '$url'..."
-        git clone $url
+        git clone --depth=1 $url # shallow clone
         echo ' done.'
         ret=1
     fi
@@ -161,7 +161,11 @@ url_fetch() {
 
     if [ ! -e "$filename" ]; then
         echo -n "Fetching $url..."
-        curl -O "$url" &>/dev/null
+	if type axel >/dev/null 2>&1 ; then # prefer axel over curl
+            axel -a "$url"
+	else # curl fallback
+            curl -O "$url" &>/dev/null
+	fi
         echo " done."
     fi
 }
@@ -295,7 +299,7 @@ build_rootfs() {
     echo
 
     echo -n "Unpacking stage3 tarball..."
-    $SUDO tar xjf $DOWNLOADS/$(basename $(get_stage3_url)) -C $ROOTFS
+    $SUDO tar xjfp $DOWNLOADS/$(basename $(get_stage3_url)) -C $ROOTFS
     echo " done."
     echo -n "Unpacking portage snapshot..."
     $SUDO tar xjf $DOWNLOADS/$(basename $PORTAGE_SNAPSHOT_URL) -C $ROOTFS/usr
@@ -353,6 +357,7 @@ EOF
 sys-fs/eudev
 EOF
 
+    run_in_chroot /usr/bin/emerge --sync
     run_in_chroot emerge --sync
 }
 
