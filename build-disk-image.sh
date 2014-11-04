@@ -178,6 +178,7 @@ setup_loopback() {
 
 run_in_chroot() {
     $SUDO cp $(which $QEMU_STATIC 2>/dev/null) $ROOTFS/$ARM_INTERP_DIR
+    $SUDO cp $(which $QEMU_STATIC 2>/dev/null) $ROOTFS/usr/bin/$ARM_INTERP_DIR
     $SUDO cp /etc/resolv.conf $ROOTFS/etc
     $SUDO mount -t proc proc $ROOTFS/proc
     $SUDO mount --rbind /sys $ROOTFS/sys
